@@ -1,13 +1,10 @@
 // Configuration
 const CONFIG = {
-    GHL_WEBHOOK_GET: '', // HighLevel GET webhook URL
-    N8N_WEBHOOK: '', // n8n webhook URL
-    GHL_MEDIA_REPO: '' // HighLevel media repository endpoint
+    N8N_WEBHOOK: '' // n8n webhook URL
 };
 
 // State management
 let uploadedFile = null;
-let uploadedImageUrl = null;
 
 // DOM Elements
 const uploadBox = document.getElementById('uploadBox');
@@ -21,7 +18,6 @@ const loadingOverlay = document.getElementById('loadingOverlay');
 // Initialize
 function init() {
     setupEventListeners();
-    checkForGHLForm();
 }
 
 // Setup Event Listeners
@@ -43,62 +39,7 @@ function setupEventListeners() {
     generateBtn.addEventListener('click', handleGenerate);
 }
 
-// Check for HighLevel form and setup listener
-function checkForGHLForm() {
-    // Monitor for GHL form submission
-    // This will need to be adjusted based on your actual GHL form implementation
-    const formContainer = document.getElementById('ghl-form-container');
-    
-    // If using GHL embedded form, listen for successful submission
-    window.addEventListener('message', (event) => {
-        // Check if message is from GHL form
-        if (event.data && event.data.type === 'ghl-form-submitted') {
-            handleGHLFormSubmission(event.data);
-        }
-    });
-}
-
-// Handle GHL Form Submission
-async function handleGHLFormSubmission(data) {
-    try {
-        console.log('GHL Form submitted:', data);
-        
-        // Get the uploaded image from GHL
-        const imageUrl = await fetchImageFromGHL(data.contactId, data.fileId);
-        
-        if (imageUrl) {
-            uploadedImageUrl = imageUrl;
-            displayPreviewImage(imageUrl);
-        }
-    } catch (error) {
-        console.error('Error handling GHL form submission:', error);
-        alert('Error processing upload. Please try again.');
-    }
-}
-
-// Fetch image from GHL
-async function fetchImageFromGHL(contactId, fileId) {
-    try {
-        const response = await fetch(`${CONFIG.GHL_WEBHOOK_GET}?contactId=${contactId}&fileId=${fileId}`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            throw new Error('Failed to fetch image from GHL');
-        }
-
-        const data = await response.json();
-        return data.imageUrl || data.url;
-    } catch (error) {
-        console.error('Error fetching image from GHL:', error);
-        throw error;
-    }
-}
-
-// Handle file selection (fallback/preview)
+// Handle file selection
 function handleFileSelect(event) {
     const file = event.target.files[0];
     if (file && file.type.startsWith('image/')) {
@@ -149,9 +90,22 @@ function handleDrop(event) {
     }
 }
 
+// Generate timestamp in yyyyMMdd-HHmmss format
+function generateTimestamp() {
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const MM = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const HH = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+    
+    return `${yyyy}${MM}${dd}-${HH}${mm}${ss}`;
+}
+
 // Handle Generate
 async function handleGenerate() {
-    if (!uploadedImageUrl && !uploadedFile) {
+    if (!uploadedFile) {
         alert('Please upload an image first');
         return;
     }
@@ -167,31 +121,27 @@ async function handleGenerate() {
     generateBtn.disabled = true;
 
     try {
-        // Prepare image data
-        let imageData;
+        // Generate unified timestamp
+        const timestamp = generateTimestamp();
+        const inputFilename = `in_${timestamp}.jpg`;
+        const outputFilename = `out_${timestamp}.jpg`;
+
+        // Convert file to base64
+        const imageBase64 = await fileToBase64(uploadedFile);
         
-        if (uploadedImageUrl) {
-            // Use URL from GHL
-            imageData = uploadedImageUrl;
-        } else if (uploadedFile) {
-            // Convert file to base64 for direct upload
-            imageData = await fileToBase64(uploadedFile);
-        }
+        // Remove data:image prefix to get pure base64
+        const base64Data = imageBase64.split(',')[1];
 
         // Send to n8n webhook
-        const result = await sendToN8N(imageData, prompt);
+        const result = await sendToN8N(base64Data, prompt, timestamp, inputFilename, outputFilename);
 
         // Display result
-        if (result && result.generatedImageUrl) {
-            displayPreviewImage(result.generatedImageUrl);
-            
-            // Save to GHL media repo
-            await saveToGHLMediaRepo(result.generatedImageUrl, prompt);
+        if (result && result.outputImageUrl) {
+            displayPreviewImage(result.outputImageUrl);
+            alert('Concept generated successfully!');
         } else {
             throw new Error('No generated image received');
         }
-
-        alert('Concept generated successfully!');
     } catch (error) {
         console.error('Error generating concept:', error);
         alert('Error generating concept. Please try again.');
@@ -202,7 +152,7 @@ async function handleGenerate() {
 }
 
 // Send to n8n webhook
-async function sendToN8N(imageData, prompt) {
+async function sendToN8N(imageBase64, prompt, timestamp, inputFilename, outputFilename) {
     try {
         const response = await fetch(CONFIG.N8N_WEBHOOK, {
             method: 'POST',
@@ -210,9 +160,11 @@ async function sendToN8N(imageData, prompt) {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                image: imageData,
+                imageBase64: imageBase64,
                 prompt: prompt,
-                timestamp: new Date().toISOString()
+                timestamp: timestamp,
+                inputFilename: inputFilename,
+                outputFilename: outputFilename
             })
         });
 
@@ -224,33 +176,6 @@ async function sendToN8N(imageData, prompt) {
     } catch (error) {
         console.error('Error sending to n8n:', error);
         throw error;
-    }
-}
-
-// Save to GHL Media Repo
-async function saveToGHLMediaRepo(imageUrl, prompt) {
-    try {
-        const response = await fetch(CONFIG.GHL_MEDIA_REPO, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                imageUrl: imageUrl,
-                prompt: prompt,
-                timestamp: new Date().toISOString(),
-                type: 'generated_concept'
-            })
-        });
-
-        if (!response.ok) {
-            console.warn('Failed to save to GHL media repo');
-        }
-        
-        return await response.json();
-    } catch (error) {
-        console.error('Error saving to GHL media repo:', error);
-        // Don't throw - this is not critical
     }
 }
 
