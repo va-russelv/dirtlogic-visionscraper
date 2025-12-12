@@ -1,6 +1,6 @@
 // Configuration
 const CONFIG = {
-    N8N_WEBHOOK: 'https://high5ai.app.n8n.cloud/webhook-test/dirtlogic-ai' // n8n webhook URL
+    N8N_WEBHOOK: 'https://high5ai.app.n8n.cloud/webhook/dirtlogic-ai' // n8n webhook URL
 };
 
 // State management
@@ -196,4 +196,5 @@ function showLoading(show) {
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', init);
+
 
